@@ -1,0 +1,122 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CompetencyBasedProxyCareerTransitionDatasetSchema",
+  "description": "Schema definition for the competency-based proxy-labeled career transition dataset used to train the PathForge transition readiness model.",
+  "type": "object",
+  "required": [
+    "candidate_id",
+    "archetype_id",
+    "target_role",
+    "skill_match_score",
+    "market_demand_score",
+    "ai_exposure_score",
+    "transferability_score",
+    "skill_breadth_score",
+    "emerging_skill_alignment",
+    "skill_gap_score",
+    "experience_years",
+    "target_role_experience_requirement",
+    "experience_gap",
+    "number_of_matching_skills",
+    "number_of_missing_skills",
+    "transition_effort_score",
+    "readiness_label"
+  ],
+  "properties": {
+    "candidate_id": {
+      "type": "string",
+      "description": "Synthetic candidate instance identifier"
+    },
+    "archetype_id": {
+      "type": "string",
+      "description": "Candidate base persona archetype identifier used for grouped splitting"
+    },
+    "target_role": {
+      "type": "string",
+      "description": "Target technology occupation title among the 20 PathForge target roles"
+    },
+    "skill_match_score": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0,
+      "description": "Direct core competency overlap ratio between candidate skills and target role"
+    },
+    "market_demand_score": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0,
+      "description": "Normalized labor market demand index for the candidate's existing skillset"
+    },
+    "ai_exposure_score": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0,
+      "description": "Empirical automation vulnerability index of candidate skills"
+    },
+    "transferability_score": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0,
+      "description": "Average portability of candidate skills across adjacent technical disciplines"
+    },
+    "skill_breadth_score": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0,
+      "description": "Breadth ratio across technical domains (frontend, backend, cloud, data, security)"
+    },
+    "emerging_skill_alignment": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0,
+      "description": "Presence ratio of modern frontier tech competencies (LLMs, Kubernetes, MLOps, etc.)"
+    },
+    "skill_gap_score": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0,
+      "description": "Ratio of missing required competencies relative to total role requirements"
+    },
+    "experience_years": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 35.0,
+      "description": "Stated or estimated professional experience years"
+    },
+    "target_role_experience_requirement": {
+      "type": "number",
+      "minimum": 1.0,
+      "maximum": 8.0,
+      "description": "Standard industry baseline experience expected for target role level"
+    },
+    "experience_gap": {
+      "type": "number",
+      "minimum": -8.0,
+      "maximum": 30.0,
+      "description": "Difference between candidate experience and target role requirement"
+    },
+    "number_of_matching_skills": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 40,
+      "description": "Absolute count of possessed skills aligning with the target role"
+    },
+    "number_of_missing_skills": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 25,
+      "description": "Absolute count of missing skills required for the target role"
+    },
+    "transition_effort_score": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0,
+      "description": "Normalized upskilling effort index based on required study weeks"
+    },
+    "readiness_label": {
+      "type": "string",
+      "enum": ["low", "moderate", "high"],
+      "description": "Proxy ground truth classification label derived from competency benchmark rules"
+    }
+  }
+}

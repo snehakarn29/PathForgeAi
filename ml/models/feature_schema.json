@@ -1,0 +1,48 @@
+{
+  "model_version": "v1.0.0",
+  "feature_count": 14,
+  "features": [
+    "skill_match_score",
+    "market_demand_score",
+    "ai_exposure_score",
+    "transferability_score",
+    "skill_breadth_score",
+    "emerging_skill_alignment",
+    "skill_gap_score",
+    "experience_years",
+    "target_role_experience_requirement",
+    "experience_gap",
+    "number_of_matching_skills",
+    "number_of_missing_skills",
+    "transition_effort_score",
+    "target_role_encoded"
+  ],
+  "target_roles": {
+    "AI Engineer": 0,
+    "Backend Developer": 1,
+    "Cloud Engineer": 2,
+    "Cloud Security Engineer": 3,
+    "Cybersecurity Analyst": 4,
+    "Data Analyst": 5,
+    "Data Engineer": 6,
+    "Data Scientist": 7,
+    "DevOps Engineer": 8,
+    "Frontend Developer": 9,
+    "Full Stack Developer": 10,
+    "Java Backend Developer": 11,
+    "MLOps Engineer": 12,
+    "Machine Learning Engineer": 13,
+    "Mobile Developer (React Native / Flutter)": 14,
+    "Platform Engineer": 15,
+    "Python Developer": 16,
+    "QA Automation Engineer": 17,
+    "Site Reliability Engineer (SRE)": 18,
+    "Solutions Architect": 19
+  },
+  "class_labels": {
+    "0": "high",
+    "1": "low",
+    "2": "moderate"
+  },
+  "readiness_score_formula": "0.15 * P(low) + 0.55 * P(moderate) + 0.90 * P(high)"
+}

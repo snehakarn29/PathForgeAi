@@ -1,0 +1,146 @@
+{
+  "model_version": "v1.0.0",
+  "algorithm": "RandomForestClassifier",
+  "hyperparameters": {
+    "n_estimators": 100,
+    "max_depth": 6,
+    "min_samples_split": 5,
+    "min_samples_leaf": 2,
+    "random_state": 42,
+    "class_weight": "balanced"
+  },
+  "dataset_metadata": {
+    "dataset_type": "Proxy-labeled synthetic benchmark",
+    "dataset_filename": "career_transitions_dataset.csv",
+    "dataset_sha256": "15e52956d1b42c702276526a0bc57523d5fe9fe3d72da8a4771b682aa09b6e89",
+    "total_rows": 1800,
+    "train_rows": 1440,
+    "test_rows": 360,
+    "train_archetypes_count": 24,
+    "test_archetypes_count": 6,
+    "split_method": "GroupShuffleSplit(grouped_by='archetype_id', test_size=0.20, random_state=42)"
+  },
+  "evaluation_metrics": {
+    "test_accuracy": 0.9694,
+    "test_precision_macro": 0.9572,
+    "test_recall_macro": 0.982,
+    "test_f1_macro": 0.9687,
+    "test_f1_weighted": 0.9699,
+    "test_roc_auc_ovr_macro": 0.9994,
+    "confusion_matrix": [
+      [
+        37,
+        0,
+        0
+      ],
+      [
+        0,
+        224,
+        10
+      ],
+      [
+        1,
+        0,
+        88
+      ]
+    ],
+    "class_labels": [
+      "high",
+      "low",
+      "moderate"
+    ],
+    "classification_report": {
+      "high": {
+        "precision": 0.9736842105263158,
+        "recall": 1.0,
+        "f1-score": 0.9866666666666667,
+        "support": 37.0
+      },
+      "low": {
+        "precision": 1.0,
+        "recall": 0.9572649572649573,
+        "f1-score": 0.9781659388646288,
+        "support": 234.0
+      },
+      "moderate": {
+        "precision": 0.8979591836734694,
+        "recall": 0.9887640449438202,
+        "f1-score": 0.9411764705882353,
+        "support": 89.0
+      },
+      "accuracy": 0.9694444444444444,
+      "macro avg": {
+        "precision": 0.9572144647332618,
+        "recall": 0.9820096674029258,
+        "f1-score": 0.9686696920398435,
+        "support": 360.0
+      },
+      "weighted avg": {
+        "precision": 0.9720685642678125,
+        "recall": 0.9694444444444444,
+        "f1-score": 0.9698950062315076,
+        "support": 360.0
+      }
+    }
+  },
+  "feature_importances": [
+    {
+      "feature": "skill_match_score",
+      "importance": 0.2491
+    },
+    {
+      "feature": "skill_gap_score",
+      "importance": 0.2368
+    },
+    {
+      "feature": "number_of_matching_skills",
+      "importance": 0.1486
+    },
+    {
+      "feature": "transition_effort_score",
+      "importance": 0.13
+    },
+    {
+      "feature": "number_of_missing_skills",
+      "importance": 0.0801
+    },
+    {
+      "feature": "experience_gap",
+      "importance": 0.0378
+    },
+    {
+      "feature": "experience_years",
+      "importance": 0.031
+    },
+    {
+      "feature": "skill_breadth_score",
+      "importance": 0.0308
+    },
+    {
+      "feature": "transferability_score",
+      "importance": 0.0302
+    },
+    {
+      "feature": "emerging_skill_alignment",
+      "importance": 0.0066
+    },
+    {
+      "feature": "target_role_experience_requirement",
+      "importance": 0.006
+    },
+    {
+      "feature": "ai_exposure_score",
+      "importance": 0.0049
+    },
+    {
+      "feature": "target_role_encoded",
+      "importance": 0.0046
+    },
+    {
+      "feature": "market_demand_score",
+      "importance": 0.0034
+    }
+  ],
+  "trained_at": "2026-10-03T14:15:26.098509Z",
+  "disclaimer": "Offline benchmark performance on proxy-labeled synthetic data. Real-world predictive validity has not been established; this model does not predict actual hiring success."
+}
