@@ -12,6 +12,9 @@ import {
   ShieldAlert
 } from 'lucide-react';
 import { TransitionRecommendation, SkillGapItem } from '../types/transitions.ts';
+import { SkillGapBridge3D } from '../components/three/SkillGapBridge3D.tsx';
+import { ThreeErrorBoundary } from '../components/three/ThreeErrorBoundary.tsx';
+import { isWebGLAvailable } from '../utils/webgl.ts';
 
 interface SkillGapsPageProps {
   recommendations: TransitionRecommendation[];
@@ -25,6 +28,8 @@ export const SkillGapsPage: React.FC<SkillGapsPageProps> = ({
   const [selectedRoleIdx, setSelectedRoleIdx] = useState(0);
   const [priorityFilter, setPriorityFilter] = useState<'All' | 'High' | 'Medium' | 'Low'>('All');
   const [searchQuery, setSearchQuery] = useState('');
+  const [viewMode, setViewMode] = useState<'3d_bridge' | 'matrix'>('3d_bridge');
+  const webGLReady = isWebGLAvailable();
 
   if (!recommendations || recommendations.length === 0) {
     return (

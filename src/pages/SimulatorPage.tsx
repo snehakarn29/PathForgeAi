@@ -18,6 +18,9 @@ import { ResilienceAnalysis } from '../types/resilience.ts';
 import { MarketSnapshot } from '../types/market.ts';
 import { calculateResilienceScore } from '../services/resilienceEngine.ts';
 import { SKILL_TAXONOMY } from '../data/taxonomy.ts';
+import { ScenarioCapabilitySpace3D } from '../components/three/ScenarioCapabilitySpace3D.tsx';
+import { ThreeErrorBoundary } from '../components/three/ThreeErrorBoundary.tsx';
+import { isWebGLAvailable } from '../utils/webgl.ts';
 
 interface SimulatorPageProps {
   profile: UserProfile | null;
@@ -32,6 +35,8 @@ export const SimulatorPage: React.FC<SimulatorPageProps> = ({
   marketSnapshot,
   onNavigate
 }) => {
+  const [show3DSpace, setShow3DSpace] = useState(true);
+  const webGLReady = isWebGLAvailable();
   if (!profile) {
     return (
       <div className="text-center py-20 space-y-4">
@@ -150,6 +155,36 @@ export const SimulatorPage: React.FC<SimulatorPageProps> = ({
           </button>
         )}
       </div>
+
+      {/* 3D Capability Envelope Visualization */}
+      {webGLReady && show3DSpace && (
+        <section className="space-y-2 animate-in fade-in duration-300">
+          <div className="flex items-center justify-between pb-1">
+            <h3 className="text-sm font-bold text-white flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-cyan-400" />
+              <span>3D Career Capability Envelope</span>
+            </h3>
+            <span className="text-[11px] font-mono text-slate-400">
+              Outer envelope dynamically expands with simulated skill additions
+            </span>
+          </div>
+          <ThreeErrorBoundary
+            fallback={
+              <div className="p-8 text-center bg-slate-900 border border-slate-800 rounded-2xl text-xs text-slate-400">
+                3D WebGL acceleration unavailable.
+              </div>
+            }
+          >
+            <ScenarioCapabilitySpace3D
+              profile={profile}
+              baseAnalysis={baseAnalysis}
+              simulatedAnalysis={simulatedAnalysis}
+              simulatedSkills={simulatedSkills}
+              scoreDelta={scoreDelta}
+            />
+          </ThreeErrorBoundary>
+        </section>
+      )}
 
       {/* Interactive Skill Addition Section */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

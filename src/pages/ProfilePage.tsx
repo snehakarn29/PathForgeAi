@@ -24,6 +24,7 @@ import {
 import { UserProfile, WorkExperienceItem, ProjectItem, CertificationItem, EducationItem } from '../types/profile.ts';
 import { DataBadge } from '../components/DataBadge.tsx';
 import { StorageService } from '../services/storageService.ts';
+import { ProfileDNA3D } from '../components/three/ProfileDNA3D.tsx';
 
 interface ProfilePageProps {
   profile: UserProfile | null;
@@ -122,6 +123,15 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
                   ? 'demo'
                   : 'live'
               }
+              label={
+                formData.extractionSource === 'gemini'
+                  ? 'AI EXTRACTED (GEMINI)'
+                  : formData.extractionSource === 'fallback'
+                  ? 'TAXONOMY FALLBACK'
+                  : formData.extractionSource === 'demo'
+                  ? 'SAMPLE BENCHMARK'
+                  : 'VERIFIED PROFILE'
+              }
             />
           </div>
           <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
@@ -159,6 +169,9 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
           </button>
         </div>
       </div>
+
+      {/* 3D Candidate DNA Spatial Glyph */}
+      <ProfileDNA3D profile={formData} />
 
       {/* Tabs */}
       <div className="flex items-center gap-1 border-b border-slate-800 text-xs font-medium text-slate-400 overflow-x-auto pb-1">

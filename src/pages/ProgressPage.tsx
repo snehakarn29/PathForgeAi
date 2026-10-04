@@ -14,6 +14,7 @@ import {
 import { UserProgress, TrackedSkill } from '../types/progress.ts';
 import { UserProfile } from '../types/profile.ts';
 import { StorageService } from '../services/storageService.ts';
+import { ProgressTrajectory3D } from '../components/three/ProgressTrajectory3D.tsx';
 
 interface ProgressPageProps {
   profile: UserProfile | null;
@@ -105,6 +106,9 @@ export const ProgressPage: React.FC<ProgressPageProps> = ({ profile, onNavigate 
           Monitor your journey from skill deficits to verified competencies. Progress persistently updates your resilience analytics.
         </p>
       </div>
+
+      {/* 3D Skill Velocity Arc Centerpiece */}
+      <ProgressTrajectory3D progress={progress} />
 
       {/* Summary KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">

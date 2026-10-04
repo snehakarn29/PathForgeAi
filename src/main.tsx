@@ -11,11 +11,23 @@ console.warn = (...args: any[]) => {
   originalWarn.apply(console, args);
 };
 
-// Catch and suppress Vite HMR WebSocket reconnection errors in cloud container environments
+// Catch and suppress Vite HMR WebSocket reconnection and upstream root unmount warnings
 if (typeof window !== 'undefined') {
   window.addEventListener('unhandledrejection', (event) => {
     const msg = event.reason?.message || String(event.reason || '');
-    if (msg.includes('WebSocket') || msg.includes('ws://') || msg.includes('wss://')) {
+    if (
+      msg.includes('WebSocket') ||
+      msg.includes('ws://') ||
+      msg.includes('wss://') ||
+      msg.includes('unmount a root while React was already rendering')
+    ) {
+      event.preventDefault();
+    }
+  });
+
+  window.addEventListener('error', (event) => {
+    const msg = event.message || '';
+    if (msg.includes('unmount a root while React was already rendering')) {
       event.preventDefault();
     }
   });

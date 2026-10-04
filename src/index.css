@@ -12,6 +12,14 @@
   }
 }
 
+.font-cinzel {
+  font-family: 'Cinzel', serif, Georgia;
+}
+
+.font-jakarta {
+  font-family: 'Plus Jakarta Sans', sans-serif, system-ui;
+}
+
 /* Custom crisp dark scrollbar */
 ::-webkit-scrollbar {
   width: 6px;

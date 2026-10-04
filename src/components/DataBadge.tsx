@@ -3,6 +3,7 @@ import { Database, Wifi, ShieldAlert, Clock, Sparkles } from 'lucide-react';
 
 interface DataBadgeProps {
   status?: 'live' | 'cached' | 'demo' | 'fallback' | 'not_configured';
+  label?: string;
   timestamp?: string;
   source?: string;
   sampleSize?: number;
@@ -11,6 +12,7 @@ interface DataBadgeProps {
 
 export const DataBadge: React.FC<DataBadgeProps> = ({
   status = 'not_configured',
+  label: customLabel,
   timestamp,
   source,
   sampleSize,
@@ -18,24 +20,24 @@ export const DataBadge: React.FC<DataBadgeProps> = ({
 }) => {
   let badgeStyle = 'bg-slate-800 text-slate-300 border-slate-700';
   let icon = <Database className="w-3.5 h-3.5" />;
-  let label = 'NOT CONFIGURED';
+  let label = customLabel || 'NOT CONFIGURED';
 
   if (status === 'live') {
     badgeStyle = 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40 shadow-sm shadow-emerald-900/20';
     icon = <Wifi className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />;
-    label = 'LIVE MARKET DATA';
+    label = customLabel || 'LIVE MARKET DATA';
   } else if (status === 'cached') {
     badgeStyle = 'bg-amber-950/70 text-amber-300 border-amber-500/40';
     icon = <Clock className="w-3.5 h-3.5 text-amber-400" />;
-    label = 'CACHED MARKET DATA';
+    label = customLabel || 'CACHED MARKET DATA';
   } else if (status === 'demo') {
     badgeStyle = 'bg-purple-950/80 text-purple-300 border-purple-500/50 shadow-sm shadow-purple-900/20';
     icon = <Sparkles className="w-3.5 h-3.5 text-purple-400" />;
-    label = 'DEMO / PROTOTYPE DATA';
+    label = customLabel || 'DEMO / PROTOTYPE DATA';
   } else if (status === 'fallback') {
     badgeStyle = 'bg-yellow-950/80 text-yellow-300 border-yellow-500/40';
     icon = <ShieldAlert className="w-3.5 h-3.5 text-yellow-400" />;
-    label = 'FALLBACK EXTRACTION';
+    label = customLabel || 'FALLBACK EXTRACTION';
   }
 
   const tooltipParts: string[] = [];

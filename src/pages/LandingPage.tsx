@@ -18,6 +18,7 @@ import {
 import { UserProfile } from '../types/profile.ts';
 import { ResilienceAnalysis } from '../types/resilience.ts';
 import { DataBadge } from '../components/DataBadge.tsx';
+import { HeroIntelligenceCore3D } from '../components/three/HeroIntelligenceCore3D.tsx';
 
 interface LandingPageProps {
   onNavigate: (route: string) => void;
@@ -93,6 +94,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                 Preview Arjun Sharma Demo
               </button>
             )}
+          </div>
+
+          {/* Interactive 3D Spatial Intelligence Nexus Centerpiece */}
+          <div className="pt-2">
+            <HeroIntelligenceCore3D onNavigate={onNavigate} />
           </div>
 
           {/* Data Integrity Pillars */}

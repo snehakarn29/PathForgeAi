@@ -15,6 +15,9 @@ import { UserProfile } from '../types/profile.ts';
 import { SKILL_TAXONOMY } from '../data/taxonomy.ts';
 import { SkillCategory, NormalizedSkill } from '../types/skills.ts';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
+import { SkillConstellation3D } from '../components/three/SkillConstellation3D.tsx';
+import { ThreeErrorBoundary } from '../components/three/ThreeErrorBoundary.tsx';
+import { isWebGLAvailable } from '../utils/webgl.ts';
 
 interface SkillsPageProps {
   profile: UserProfile | null;
@@ -25,6 +28,8 @@ export const SkillsPage: React.FC<SkillsPageProps> = ({ profile, onNavigate }) =
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedSkill, setSelectedSkill] = useState<NormalizedSkill | null>(SKILL_TAXONOMY[0]);
+  const [viewMode, setViewMode] = useState<'3d_constellation' | 'chart'>('3d_constellation');
+  const webGLReady = isWebGLAvailable();
 
   const userSkillNames = new Set(profile?.skills.map(s => s.toLowerCase()) || []);
 
@@ -54,26 +59,77 @@ export const SkillsPage: React.FC<SkillsPageProps> = ({ profile, onNavigate }) =
 
   return (
     <div className="space-y-8 py-6">
-      {/* Header */}
-      <div>
-        <div className="flex items-center gap-2 mb-1.5">
-          <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 font-mono">
-            Taxonomy & Automation Matrix
-          </span>
-          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-cyan-950 text-cyan-300 border border-cyan-800/60 font-mono">
-            100+ Benchmark Tech Skills
-          </span>
+      {/* Header & View Switcher */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2 mb-1.5">
+            <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 font-mono">
+              Taxonomy & Automation Matrix
+            </span>
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-cyan-950 text-cyan-300 border border-cyan-800/60 font-mono">
+              100+ Benchmark Tech Skills
+            </span>
+          </div>
+          <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
+            Skills Intelligence & AI Exposure
+          </h1>
+          <p className="text-xs sm:text-sm text-slate-400 max-w-2xl">
+            Standardized skill taxonomy with cross-industry ESCO and O*NET references, transferability coefficients, and empirical automation exposure ratings.
+          </p>
         </div>
-        <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-          Skills Intelligence & AI Exposure
-        </h1>
-        <p className="text-xs sm:text-sm text-slate-400 max-w-2xl">
-          Standardized skill taxonomy with cross-industry ESCO and O*NET references, transferability coefficients, and empirical automation exposure ratings.
-        </p>
+
+        {/* View Switcher */}
+        <div className="flex items-center p-1 rounded-xl bg-slate-900 border border-slate-800 text-xs self-start sm:self-auto shrink-0">
+          <button
+            onClick={() => setViewMode('3d_constellation')}
+            disabled={!webGLReady}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-semibold transition ${
+              viewMode === '3d_constellation'
+                ? 'bg-cyan-500 text-slate-950 shadow-sm'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>3D Constellation</span>
+          </button>
+          <button
+            onClick={() => setViewMode('chart')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-semibold transition ${
+              viewMode === 'chart'
+                ? 'bg-cyan-500 text-slate-950 shadow-sm'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Layers className="w-3.5 h-3.5" />
+            <span>2D Distribution</span>
+          </button>
+        </div>
       </div>
 
+      {/* 3D Spatial Constellation */}
+      {viewMode === '3d_constellation' && webGLReady && (
+        <section className="space-y-2 animate-in fade-in duration-300">
+          <ThreeErrorBoundary
+            fallback={
+              <div className="p-8 text-center bg-slate-900 border border-slate-800 rounded-2xl text-xs text-slate-400">
+                3D WebGL acceleration unavailable. Please switch to 2D Distribution.
+              </div>
+            }
+          >
+            <SkillConstellation3D
+              skills={filteredSkills}
+              profile={profile}
+              selectedCategory={selectedCategory}
+              selectedSkill={selectedSkill}
+              onSelectSkill={setSelectedSkill}
+            />
+          </ThreeErrorBoundary>
+        </section>
+      )}
+
       {/* Analytical Chart: Demand vs Exposure by Category */}
-      <section className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
+      {viewMode === 'chart' && (
+      <section className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4 animate-in fade-in duration-200">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div>
             <h3 className="text-sm font-bold text-white">Domain Demand vs. Automation Exposure Distribution</h3>
@@ -105,6 +161,7 @@ export const SkillsPage: React.FC<SkillsPageProps> = ({ profile, onNavigate }) =
           </ResponsiveContainer>
         </div>
       </section>
+      )}
 
       {/* Filter and Search Bar */}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-3">

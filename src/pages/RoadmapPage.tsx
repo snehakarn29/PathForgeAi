@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { LearningRoadmap, RoadmapMilestone } from '../types/roadmap.ts';
 import { StorageService } from '../services/storageService.ts';
+import { RoadmapJourney3D } from '../components/three/RoadmapJourney3D.tsx';
 
 interface RoadmapPageProps {
   roadmap: LearningRoadmap | null;
@@ -119,6 +120,13 @@ export const RoadmapPage: React.FC<RoadmapPageProps> = ({
           </div>
         </div>
       </div>
+
+      {/* 3D Ascending Roadmap Spatial Trajectory */}
+      <RoadmapJourney3D
+        roadmap={roadmap}
+        milestones={milestones}
+        onToggleStatus={toggleStatus}
+      />
 
       {/* Phased Milestones List */}
       <div className="space-y-6">

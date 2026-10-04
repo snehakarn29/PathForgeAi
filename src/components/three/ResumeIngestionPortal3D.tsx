@@ -1,136 +1,247 @@
-import React, { useRef } from 'react';
+import React, { useRef, useMemo } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { Float } from '@react-three/drei';
 import * as THREE from 'three';
 import { ThreeErrorBoundary } from './ThreeErrorBoundary.tsx';
+import { isWebGLAvailable } from '../../utils/webgl.ts';
 
 interface ResumeIngestionPortal3DProps {
   status: 'idle' | 'reading' | 'gemini_extract' | 'normalizing' | 'complete' | 'error';
   isDragging: boolean;
 }
 
-function IngestionScene({ status, isDragging }: ResumeIngestionPortal3DProps) {
-  const coreRef = useRef<THREE.Mesh>(null);
-  const ring1Ref = useRef<THREE.Group>(null);
-  const ring2Ref = useRef<THREE.Group>(null);
-  const ring3Ref = useRef<THREE.Group>(null);
-  const scanPlaneRef = useRef<THREE.Mesh>(null);
-
-  // Speed multiplier based on state
-  const speed = isDragging ? 3.5 : (status === 'gemini_extract' ? 2.5 : (status === 'normalizing' ? 1.8 : 0.8));
+// ----------------------------------------------------
+// 1. Floating 3D Resume Document Card
+// ----------------------------------------------------
+function ResumeDocumentCard({
+  status,
+  isDragging
+}: {
+  status: ResumeIngestionPortal3DProps['status'];
+  isDragging: boolean;
+}) {
+  const cardRef = useRef<THREE.Group>(null);
+  const laserRef = useRef<THREE.Mesh>(null);
   const timeRef = useRef(0);
 
-  useFrame((state, delta) => {
+  const isScanning = status === 'reading' || status === 'gemini_extract' || status === 'normalizing';
+  const isComplete = status === 'complete';
+
+  useFrame((_, delta) => {
     timeRef.current += delta;
     const t = timeRef.current;
 
-    if (coreRef.current) {
-      coreRef.current.rotation.x += delta * 0.4 * speed;
-      coreRef.current.rotation.y += delta * 0.6 * speed;
-      // Pulse scale when extracting
-      if (status === 'gemini_extract') {
-        const pulse = 1.0 + Math.sin(t * 8) * 0.12;
-        coreRef.current.scale.set(pulse, pulse, pulse);
+    if (cardRef.current) {
+      // Perspective floating rotation
+      if (isDragging) {
+        cardRef.current.rotation.y = Math.sin(t * 4) * 0.35;
+        cardRef.current.rotation.x = Math.cos(t * 3) * 0.2;
+        cardRef.current.scale.lerp(new THREE.Vector3(1.15, 1.15, 1.15), 0.1);
+      } else if (isScanning) {
+        cardRef.current.rotation.y = Math.sin(t * 1.5) * 0.15;
+        cardRef.current.rotation.x = 0.05 + Math.cos(t * 2) * 0.05;
+        cardRef.current.scale.lerp(new THREE.Vector3(1.05, 1.05, 1.05), 0.1);
       } else {
-        coreRef.current.scale.lerp(new THREE.Vector3(1, 1, 1), 0.1);
+        cardRef.current.rotation.y = Math.sin(t * 0.8) * 0.12;
+        cardRef.current.rotation.x = 0.05;
+        cardRef.current.scale.lerp(new THREE.Vector3(1, 1, 1), 0.1);
       }
     }
 
-    if (ring1Ref.current) {
-      ring1Ref.current.rotation.z += delta * 0.5 * speed;
-      ring1Ref.current.rotation.x += delta * 0.2 * speed;
-    }
-
-    if (ring2Ref.current) {
-      ring2Ref.current.rotation.y -= delta * 0.7 * speed;
-      ring2Ref.current.rotation.z += delta * 0.3 * speed;
-    }
-
-    if (ring3Ref.current) {
-      ring3Ref.current.rotation.x -= delta * 0.4 * speed;
-      ring3Ref.current.rotation.y += delta * 0.5 * speed;
-    }
-
-    // Laser scan animation during Gemini extraction
-    if (scanPlaneRef.current) {
-      if (status === 'gemini_extract' || status === 'reading') {
-        scanPlaneRef.current.visible = true;
-        scanPlaneRef.current.position.y = Math.sin(t * 4) * 1.8;
+    // Laser beam vertical sweep
+    if (laserRef.current) {
+      if (isScanning) {
+        laserRef.current.visible = true;
+        // Sweep between y = -1.2 and +1.2
+        laserRef.current.position.y = Math.sin(t * 4.5) * 1.15;
       } else {
-        scanPlaneRef.current.visible = false;
+        laserRef.current.visible = false;
       }
     }
   });
 
-  const coreColor = isDragging
+  const cardBorderColor = isComplete
+    ? '#10b981'
+    : isDragging
     ? '#38bdf8'
-    : (status === 'gemini_extract'
-      ? '#a855f7'
-      : (status === 'normalizing' ? '#10b981' : '#06b6d4'));
+    : isScanning
+    ? '#a855f7'
+    : '#0ea5e9';
 
   return (
-    <group>
-      <ambientLight intensity={0.7} />
-      <pointLight position={[5, 5, 5]} intensity={1.5} color="#22d3ee" />
-      <pointLight position={[-5, -5, -3]} intensity={1.0} color="#a855f7" />
-
-      {/* Central Quantum Ingestion Crystal */}
-      <Float speed={2} rotationIntensity={0.5} floatIntensity={0.5}>
-        <mesh ref={coreRef}>
-          <octahedronGeometry args={[1.1, 0]} />
-          <meshStandardMaterial
-            color={coreColor}
-            wireframe
-            emissive={coreColor}
-            emissiveIntensity={0.4}
-            roughness={0.2}
-            metalness={0.8}
-          />
-        </mesh>
-      </Float>
-
-      {/* Inner Glowing Core */}
-      <mesh scale={[0.6, 0.6, 0.6]}>
-        <sphereGeometry args={[0.8, 16, 16]} />
-        <meshBasicMaterial
-          color={coreColor}
-          transparent
-          opacity={status === 'gemini_extract' ? 0.8 : 0.35}
+    <group ref={cardRef}>
+      {/* Document Sheet Body */}
+      <mesh position={[0, 0, 0]}>
+        <boxGeometry args={[2.0, 2.6, 0.06]} />
+        <meshStandardMaterial
+          color="#0f172a"
+          roughness={0.25}
+          metalness={0.7}
         />
       </mesh>
 
-      {/* Orbital Ring 1: Primary Horizon */}
-      <group ref={ring1Ref}>
-        <mesh rotation={[Math.PI / 2, 0, 0]}>
-          <torusGeometry args={[2.0, 0.02, 16, 64]} />
-          <meshBasicMaterial color="#06b6d4" transparent opacity={0.5} />
-        </mesh>
-      </group>
-
-      {/* Orbital Ring 2: Polar Ring */}
-      <group ref={ring2Ref}>
-        <mesh rotation={[0, Math.PI / 4, Math.PI / 6]}>
-          <torusGeometry args={[2.4, 0.025, 16, 64]} />
-          <meshBasicMaterial color="#8b5cf6" transparent opacity={0.45} />
-        </mesh>
-      </group>
-
-      {/* Orbital Ring 3: Tilted Outer Ring */}
-      <group ref={ring3Ref}>
-        <mesh rotation={[Math.PI / 3, Math.PI / 4, 0]}>
-          <torusGeometry args={[2.8, 0.02, 16, 64]} />
-          <meshBasicMaterial color="#3b82f6" transparent opacity={0.35} />
-        </mesh>
-      </group>
-
-      {/* Gemini AI Scanning Beam */}
-      <mesh ref={scanPlaneRef} rotation={[Math.PI / 2, 0, 0]}>
-        <ringGeometry args={[0.2, 2.6, 32]} />
+      {/* Sheet Border Accent */}
+      <mesh position={[0, 0, 0]}>
+        <boxGeometry args={[2.04, 2.64, 0.04]} />
         <meshBasicMaterial
-          color="#c084fc"
-          side={THREE.DoubleSide}
+          color={cardBorderColor}
+          wireframe
           transparent
-          opacity={0.45}
+          opacity={0.7}
+        />
+      </mesh>
+
+      {/* Simulated Document Header Line */}
+      <mesh position={[-0.45, 0.9, 0.04]}>
+        <planeGeometry args={[0.8, 0.12]} />
+        <meshBasicMaterial color={cardBorderColor} />
+      </mesh>
+
+      {/* Simulated Avatar / Photo Box */}
+      <mesh position={[0.65, 0.85, 0.04]}>
+        <planeGeometry args={[0.35, 0.35]} />
+        <meshBasicMaterial color="#334155" />
+      </mesh>
+
+      {/* Simulated Text Lines */}
+      {[-0.4, -0.15, 0.1, 0.35, 0.6].map((y, idx) => (
+        <mesh key={idx} position={[0, -y, 0.04]}>
+          <planeGeometry args={[1.5, 0.06]} />
+          <meshBasicMaterial color="#1e293b" />
+        </mesh>
+      ))}
+
+      {/* Laser Scanning Beam Plane */}
+      <mesh ref={laserRef} position={[0, 0, 0.08]} visible={false}>
+        <planeGeometry args={[2.1, 0.08]} />
+        <meshBasicMaterial
+          color="#22d3ee"
+          transparent
+          opacity={0.9}
+          blending={THREE.AdditiveBlending}
+        />
+      </mesh>
+    </group>
+  );
+}
+
+// ----------------------------------------------------
+// 2. Extracted Skill Particle Stream
+// ----------------------------------------------------
+function ExtractedSkillStream({ status }: { status: ResumeIngestionPortal3DProps['status'] }) {
+  const pointsRef = useRef<THREE.Points>(null);
+  const isExtracting = status === 'gemini_extract' || status === 'normalizing';
+
+  const { positions, velocities } = useMemo(() => {
+    const count = 75;
+    const pos = new Float32Array(count * 3);
+    const vel = new Float32Array(count * 3);
+
+    for (let i = 0; i < count; i++) {
+      pos[i * 3] = (Math.random() - 0.5) * 1.5;
+      pos[i * 3 + 1] = (Math.random() - 0.5) * 2.0;
+      pos[i * 3 + 2] = 0.2 + Math.random() * 0.5;
+
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 0.5 + Math.random() * 1.5;
+      vel[i * 3] = Math.cos(angle) * speed;
+      vel[i * 3 + 1] = Math.sin(angle) * speed;
+      vel[i * 3 + 2] = 0.8 + Math.random() * 1.2;
+    }
+
+    return { positions: pos, velocities: vel };
+  }, []);
+
+  useFrame((_, delta) => {
+    if (!pointsRef.current || !isExtracting) return;
+    const posAttr = pointsRef.current.geometry.attributes.position as THREE.BufferAttribute;
+    const array = posAttr.array as Float32Array;
+
+    for (let i = 0; i < array.length / 3; i++) {
+      array[i * 3] += velocities[i * 3] * delta;
+      array[i * 3 + 1] += velocities[i * 3 + 1] * delta;
+      array[i * 3 + 2] += velocities[i * 3 + 2] * delta;
+
+      // Reset when particle drifts too far
+      if (array[i * 3 + 2] > 4.5 || Math.abs(array[i * 3]) > 3.5) {
+        array[i * 3] = (Math.random() - 0.5) * 1.5;
+        array[i * 3 + 1] = (Math.random() - 0.5) * 2.0;
+        array[i * 3 + 2] = 0.2;
+      }
+    }
+    posAttr.needsUpdate = true;
+  });
+
+  if (!isExtracting) return null;
+
+  return (
+    <points ref={pointsRef}>
+      <bufferGeometry>
+        <bufferAttribute attach="attributes-position" args={[positions, 3]} />
+      </bufferGeometry>
+      <pointsMaterial
+        size={0.16}
+        color="#38bdf8"
+        transparent
+        opacity={0.85}
+        sizeAttenuation
+        blending={THREE.AdditiveBlending}
+      />
+    </points>
+  );
+}
+
+// ----------------------------------------------------
+// 3. Gyroscopic Ingestion Rings
+// ----------------------------------------------------
+function IngestionRings({
+  status,
+  isDragging
+}: {
+  status: ResumeIngestionPortal3DProps['status'];
+  isDragging: boolean;
+}) {
+  const ring1 = useRef<THREE.Mesh>(null);
+  const ring2 = useRef<THREE.Mesh>(null);
+
+  const speed = isDragging ? 3.0 : (status === 'gemini_extract' ? 2.5 : 0.8);
+
+  useFrame((_, delta) => {
+    if (ring1.current) {
+      ring1.current.rotation.z += delta * 0.4 * speed;
+      ring1.current.rotation.x += delta * 0.2 * speed;
+    }
+    if (ring2.current) {
+      ring2.current.rotation.y -= delta * 0.5 * speed;
+      ring2.current.rotation.z -= delta * 0.3 * speed;
+    }
+  });
+
+  const ringColor = status === 'complete'
+    ? '#10b981'
+    : status === 'gemini_extract'
+    ? '#a855f7'
+    : '#06b6d4';
+
+  return (
+    <group>
+      <mesh ref={ring1} rotation={[Math.PI / 3, 0, 0]}>
+        <torusGeometry args={[2.5, 0.025, 16, 64]} />
+        <meshBasicMaterial
+          color={ringColor}
+          transparent
+          opacity={0.4}
+          blending={THREE.AdditiveBlending}
+        />
+      </mesh>
+
+      <mesh ref={ring2} rotation={[-Math.PI / 4, Math.PI / 4, 0]}>
+        <torusGeometry args={[3.1, 0.02, 16, 64]} />
+        <meshBasicMaterial
+          color="#38bdf8"
+          transparent
+          opacity={0.3}
+          blending={THREE.AdditiveBlending}
         />
       </mesh>
     </group>
@@ -141,26 +252,31 @@ export const ResumeIngestionPortal3D: React.FC<ResumeIngestionPortal3DProps> = (
   status,
   isDragging
 }) => {
+  const webGLReady = isWebGLAvailable();
+
+  if (!webGLReady) {
+    return null;
+  }
+
   return (
-    <div className="w-full h-44 sm:h-52 relative flex items-center justify-center overflow-hidden rounded-2xl select-none">
-      <ThreeErrorBoundary
-        fallback={
-          <div className="w-full h-full flex items-center justify-center bg-cyan-950/20 text-cyan-400 text-xs font-mono">
-            3D Ingestion Core Active
-          </div>
-        }
-      >
+    <div className="w-full h-56 sm:h-64 relative rounded-2xl overflow-hidden pointer-events-none select-none">
+      <ThreeErrorBoundary fallback={<div className="hidden" />}>
         <Canvas
-          camera={{ position: [0, 0, 6], fov: 48 }}
+          camera={{ position: [0, 0, 6.2], fov: 46 }}
           gl={{ antialias: true, alpha: true, powerPreference: 'high-performance' }}
-          style={{ width: '100%', height: '100%', background: 'transparent' }}
+          style={{ width: '100%', height: '100%' }}
         >
-          <IngestionScene status={status} isDragging={isDragging} />
+          <ambientLight intensity={0.7} />
+          <pointLight position={[4, 5, 4]} intensity={1.8} color="#22d3ee" />
+          <pointLight position={[-4, -4, -3]} intensity={1.2} color="#a855f7" />
+
+          <Float speed={1.8} rotationIntensity={0.2} floatIntensity={0.35}>
+            <ResumeDocumentCard status={status} isDragging={isDragging} />
+            <ExtractedSkillStream status={status} />
+            <IngestionRings status={status} isDragging={isDragging} />
+          </Float>
         </Canvas>
       </ThreeErrorBoundary>
-
-      {/* Subtle Bottom Holographic Ground Shadow */}
-      <div className="absolute bottom-1 left-1/2 -translate-x-1/2 w-48 h-4 rounded-full bg-cyan-500/20 blur-xl pointer-events-none" />
     </div>
   );
 };

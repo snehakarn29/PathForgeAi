@@ -17,17 +17,8 @@ export function isWebGLAvailable(): boolean {
       canvas.getContext('webgl') ||
       canvas.getContext('experimental-webgl');
 
-    const available = Boolean(window.WebGLRenderingContext && gl);
-
-    if (gl) {
-      const loseContext = (gl as any).getExtension('WEBGL_lose_context');
-      if (loseContext) {
-        loseContext.loseContext();
-      }
-    }
-
-    cachedWebGLSupport = available;
-    return available;
+    cachedWebGLSupport = Boolean(window.WebGLRenderingContext && gl);
+    return cachedWebGLSupport;
   } catch {
     cachedWebGLSupport = false;
     return false;

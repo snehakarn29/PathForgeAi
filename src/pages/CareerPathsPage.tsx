@@ -20,8 +20,13 @@ import { TransitionRecommendation } from '../types/transitions.ts';
 import { MLTransitionPrediction, MLTransitionFeatureInput } from '../types/ml.ts';
 import { MLReadinessCard } from '../components/MLReadinessCard.tsx';
 import { StorageService } from '../services/storageService.ts';
+import { UserProfile } from '../types/profile.ts';
+import { CareerTransitionGraph3D, TransitionNode3D } from '../components/three/CareerTransitionGraph3D.tsx';
+import { ThreeErrorBoundary } from '../components/three/ThreeErrorBoundary.tsx';
+import { isWebGLAvailable } from '../utils/webgl.ts';
 
 interface CareerPathsPageProps {
+  profile?: UserProfile | null;
   recommendations: TransitionRecommendation[];
   onSelectPath: (rec: TransitionRecommendation) => void;
   onGenerateRoadmap: (rec: TransitionRecommendation) => void;
@@ -29,6 +34,7 @@ interface CareerPathsPageProps {
 }
 
 export const CareerPathsPage: React.FC<CareerPathsPageProps> = ({
+  profile,
   recommendations,
   onSelectPath,
   onGenerateRoadmap,
@@ -40,6 +46,8 @@ export const CareerPathsPage: React.FC<CareerPathsPageProps> = ({
 
   const [mlPrediction, setMlPrediction] = useState<MLTransitionPrediction | null>(null);
   const [mlLoading, setMlLoading] = useState(false);
+  const [viewMode, setViewMode] = useState<'3d_topology' | 'cards'>('3d_topology');
+  const webGLReady = isWebGLAvailable();
 
   useEffect(() => {
     if (recommendations.length > 0 && (!selectedRecId || !recommendations.some(r => r.id === selectedRecId))) {
@@ -155,14 +163,62 @@ export const CareerPathsPage: React.FC<CareerPathsPageProps> = ({
           </p>
         </div>
 
-        <button
-          onClick={() => onNavigate('/command-center')}
-          className="self-start sm:self-auto flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold bg-cyan-950 hover:bg-cyan-900/80 text-cyan-300 border border-cyan-800/60 transition shadow-sm shrink-0"
-        >
-          <Compass className="w-4 h-4 text-cyan-400" />
-          <span>View 3D Topology</span>
-        </button>
+        {/* Mode Toggle & Command Center Link */}
+        <div className="flex items-center gap-3 self-start sm:self-auto">
+          <div className="flex items-center p-1 rounded-xl bg-slate-900 border border-slate-800 text-xs">
+            <button
+              onClick={() => setViewMode('3d_topology')}
+              disabled={!webGLReady}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-semibold transition ${
+                viewMode === '3d_topology'
+                  ? 'bg-cyan-500 text-slate-950 shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Compass className="w-3.5 h-3.5" />
+              <span>3D Graph</span>
+            </button>
+            <button
+              onClick={() => setViewMode('cards')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-semibold transition ${
+                viewMode === 'cards'
+                  ? 'bg-cyan-500 text-slate-950 shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Layers className="w-3.5 h-3.5" />
+              <span>Cards</span>
+            </button>
+          </div>
+
+          <button
+            onClick={() => onNavigate('/command-center')}
+            className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold bg-slate-900 hover:bg-slate-850 text-slate-300 border border-slate-750 transition shadow-sm shrink-0"
+          >
+            <span>Command Center &rarr;</span>
+          </button>
+        </div>
       </div>
+
+      {/* 3D Spatial Transition Graph */}
+      {viewMode === '3d_topology' && webGLReady && (
+        <section className="space-y-2 animate-in fade-in duration-300">
+          <ThreeErrorBoundary
+            fallback={
+              <div className="p-8 text-center bg-slate-900 border border-slate-800 rounded-2xl text-xs text-slate-400">
+                3D WebGL acceleration unavailable. Please switch to Card view.
+              </div>
+            }
+          >
+            <CareerTransitionGraph3D
+              profile={profile || null}
+              recommendations={recommendations}
+              selectedRecId={selectedRecId}
+              onSelectRec={(recId) => setSelectedRecId(recId)}
+            />
+          </ThreeErrorBoundary>
+        </section>
+      )}
 
       {/* Top 3 Cards Grid */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
