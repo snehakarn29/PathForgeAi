@@ -6,6 +6,7 @@ import mammoth from 'mammoth';
 import { GoogleGenAI, Type } from '@google/genai';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import zlib from 'zlib';
 import { MLClientService } from './src/services/mlClientService.ts';
 import { SKILL_TAXONOMY } from './src/data/taxonomy.ts';
 import { TARGET_ROLES } from './src/data/targetRoles.ts';
@@ -14,10 +15,12 @@ const require = createRequire(import.meta.url);
 const pdfParsePkg = require('pdf-parse');
 
 /**
- * Universal safe PDF text extractor supporting pdf-parse v2 class structure
- * and fallback extraction methods without throwing errors.
+ * Universal safe PDF text extractor supporting pdf-parse v2 class structure,
+ * native zlib decompress of /FlateDecode streams, and regex chunk extraction.
  */
 async function extractTextFromPdf(buffer: Buffer): Promise<string> {
+  const textChunks: string[] = [];
+
   // 1. Try class-based PDFParse (v2.x)
   try {
     if (pdfParsePkg && pdfParsePkg.PDFParse) {
@@ -27,26 +30,50 @@ async function extractTextFromPdf(buffer: Buffer): Promise<string> {
         try { await parser.destroy(); } catch {}
       }
       if (result && result.text && result.text.trim()) {
-        return result.text;
+        const clean = result.text.replace(/\r\n/g, '\n').trim();
+        if (clean.length > 25) return clean;
       }
     }
   } catch (err: any) {
     console.warn('[PDFParse v2 notice]:', err?.message);
   }
 
-  // 2. Try function-based pdf-parse (v1.x legacy)
+  // 2. Direct decompression of /FlateDecode streams using native zlib
   try {
-    if (typeof pdfParsePkg === 'function') {
-      const parsed = await (pdfParsePkg as any)(buffer);
-      if (parsed && parsed.text && parsed.text.trim()) {
-        return parsed.text;
+    const rawStr = buffer.toString('latin1');
+    const tjMatches = rawStr.match(/\(([^)]+)\)\s*(?:Tj|'|")/g);
+    if (tjMatches) {
+      for (const m of tjMatches) {
+        const clean = m.replace(/^\(/, '').replace(/\)\s*(?:Tj|'|")$/, '').trim();
+        if (clean && clean.length > 1) textChunks.push(clean);
       }
     }
-  } catch (err: any) {
-    console.warn('[PDFParse v1 notice]:', err?.message);
+
+    const streamRegex = /stream\r?\n([\s\S]*?)\r?\nendstream/g;
+    let match: RegExpExecArray | null;
+    while ((match = streamRegex.exec(rawStr)) !== null) {
+      const streamContent = match[1];
+      const streamBuffer = Buffer.from(streamContent, 'latin1');
+      try {
+        const decompressed = zlib.inflateSync(streamBuffer).toString('latin1');
+        const dMatches = decompressed.match(/\(([^)]+)\)\s*(?:Tj|'|")/g);
+        if (dMatches) {
+          for (const m of dMatches) {
+            const clean = m.replace(/^\(/, '').replace(/\)\s*(?:Tj|'|")$/, '').trim();
+            if (clean && clean.length > 1) textChunks.push(clean);
+          }
+        }
+      } catch {}
+    }
+  } catch (zlibErr: any) {
+    console.warn('[Zlib PDF stream notice]:', zlibErr?.message);
   }
 
-  // 3. Robust regex fallback on printable ASCII text chunks
+  if (textChunks.length > 5) {
+    return textChunks.join(' ');
+  }
+
+  // 3. Fallback: printable ASCII text chunks
   try {
     const rawStr = buffer.toString('binary');
     const matches = rawStr.match(/[a-zA-Z0-9.,;: \-\n\r@()]{4,}/g) || [];
@@ -81,6 +108,20 @@ const port = parseInt(process.env.PORT || '3000', 10);
 
 app.use(express.json({ limit: '15mb' }));
 app.use(express.urlencoded({ extended: true, limit: '15mb' }));
+
+// Universal CORS and API preflight middleware
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+  if (req.path.startsWith('/api/')) {
+    res.setHeader('Content-Type', 'application/json');
+  }
+  next();
+});
 
 // In-memory telemetry for System Audit
 const auditMetrics = {
@@ -228,15 +269,24 @@ const RESUME_RESPONSE_SCHEMA = {
 // ----------------------------------------------------
 // Deterministic Skill & Profile Extraction Helper (Taxonomy-driven)
 // ----------------------------------------------------
-export function extractDeterministicProfileFromText(text: string): any {
-  const emailMatch = text.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
-  const phoneMatch = text.match(/(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/);
+function matchSkillInText(term: string, text: string): boolean {
+  if (!term || !text) return false;
+  const esc = term.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // Safe boundaries supporting C++, C#, .NET, Node.js
+  const pattern = new RegExp('(?:^|[^a-zA-Z0-9_#+])' + esc + '(?:$|[^a-zA-Z0-9_#+])', 'i');
+  return pattern.test(text);
+}
 
-  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+export function extractDeterministicProfileFromText(text: string): any {
+  const safeText = (text || '').trim();
+  const emailMatch = safeText.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+  const phoneMatch = safeText.match(/(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/);
+
+  const lines = safeText.split('\n').map(l => l.trim()).filter(Boolean);
 
   // 1. Scan for Candidate Full Name
   let potentialName: string | null = null;
-  const namePrefixMatch = text.match(/(?:name\s*[:\-\|]\s*)([A-Z][a-zA-Z\s.]{2,30})/i);
+  const namePrefixMatch = safeText.match(/(?:name\s*[:\-\|]\s*)([A-Z][a-zA-Z\s.]{2,30})/i);
   if (namePrefixMatch && namePrefixMatch[1]) {
     potentialName = namePrefixMatch[1].trim();
   }
@@ -272,11 +322,10 @@ export function extractDeterministicProfileFromText(text: string): any {
 
   // 2. Scan for Current Role
   let potentialRole: string | null = null;
-  const lowerText = text.toLowerCase();
+  const lowerText = safeText.toLowerCase();
 
   for (const roleDef of TARGET_ROLES) {
-    const escaped = roleDef.title.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    if (new RegExp(`\\b${escaped}\\b`, 'i').test(lowerText)) {
+    if (matchSkillInText(roleDef.title, safeText)) {
       potentialRole = roleDef.title;
       break;
     }
@@ -297,17 +346,15 @@ export function extractDeterministicProfileFromText(text: string): any {
     }
   }
 
-  // 3. Scan for Skills using full SKILL_TAXONOMY
+  // 3. Scan for Skills using full SKILL_TAXONOMY with safe symbol matching
   const foundSkillsSet = new Set<string>();
   for (const skill of SKILL_TAXONOMY) {
-    const escName = skill.name.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    if (new RegExp(`\\b${escName}\\b`, 'i').test(lowerText)) {
+    if (matchSkillInText(skill.name, safeText)) {
       foundSkillsSet.add(skill.name);
       continue;
     }
     for (const alias of skill.aliases) {
-      const escAlias = alias.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      if (new RegExp(`\\b${escAlias}\\b`, 'i').test(lowerText)) {
+      if (matchSkillInText(alias, safeText)) {
         foundSkillsSet.add(skill.name);
         break;
       }
@@ -316,21 +363,21 @@ export function extractDeterministicProfileFromText(text: string): any {
 
   const foundSkills = Array.from(foundSkillsSet);
 
-  // 4. Experience Years calculation heuristic
+  // 4. Experience Years calculation (factual only from text)
   let yearsOfExp: number | null = null;
-  const expMatch = text.match(/(\d+(?:\.\d+)?)\+?\s*(?:years?|yrs?)(?:\s+of)?\s+experience/i);
+  const expMatch = safeText.match(/(\d+(?:\.\d+)?)\+?\s*(?:years?|yrs?)(?:\s+of)?\s+experience/i);
   if (expMatch && expMatch[1]) {
     yearsOfExp = parseFloat(expMatch[1]);
   }
 
-  // 5. Education scan
+  // 5. Education scan (factual only from text)
   const education: any[] = [];
-  const eduMatches = text.match(/(?:B\.?Tech|B\.?E\.?|B\.?S\.?|M\.?S\.?|M\.?Tech|BCA|MCA|Bachelor|Master|Diploma)[\w\s,.-]{2,60}/gi);
+  const eduMatches = safeText.match(/\b(?:B\.?Tech|B\.?E\.?|B\.?S\.?|M\.?S\.?|M\.?Tech|BCA|MCA|Bachelor|Master|Diploma|Ph\.?D)\b[\w\s,.-]{2,60}/gi);
   if (eduMatches) {
-    for (const e of eduMatches.slice(0, 2)) {
+    for (const e of eduMatches.slice(0, 3)) {
       education.push({
         degree: e.trim(),
-        fieldOfStudy: 'Computer Science & Technology',
+        fieldOfStudy: '',
         institution: '',
         year: ''
       });
@@ -339,10 +386,19 @@ export function extractDeterministicProfileFromText(text: string): any {
 
   return {
     id: `profile-${Date.now()}`,
-    fullName: potentialName,
+    basics: {
+      fullName: potentialName || null,
+      email: emailMatch ? emailMatch[0] : null,
+      phone: phoneMatch ? phoneMatch[0] : null,
+      currentRole: potentialRole || null,
+      yearsOfExperience: yearsOfExp,
+      location: null,
+      summary: lines.find(l => l.length > 50 && l.length < 250) || null
+    },
+    fullName: potentialName || null,
     email: emailMatch ? emailMatch[0] : null,
     phone: phoneMatch ? phoneMatch[0] : null,
-    currentRole: potentialRole,
+    currentRole: potentialRole || null,
     yearsOfExperience: yearsOfExp,
     location: null,
     summary: lines.find(l => l.length > 50 && l.length < 250) || null,
@@ -354,7 +410,7 @@ export function extractDeterministicProfileFromText(text: string): any {
     softSkills: [],
     projects: [],
     certifications: [],
-    workExperience: potentialRole ? [{ company: '', role: potentialRole, duration: '', responsibilities: [] }] : [],
+    workExperience: [],
     careerInterests: [],
     domains: [],
     tools: [],
@@ -363,40 +419,49 @@ export function extractDeterministicProfileFromText(text: string): any {
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     extractionSource: 'fallback',
-    extractionConfidence: 0.90
+    extractionConfidence: 0.85
   };
 }
 
 // ----------------------------------------------------
-// 1. Direct Unified Document Upload & AI Extraction
+// Unified High-Fidelity Resume Extraction Handler
 // ----------------------------------------------------
-app.post('/api/resume/upload-and-extract', upload.single('resume') as any, async (req: express.Request, res: express.Response) => {
+async function handleResumeExtraction(req: express.Request, res: express.Response) {
   res.setHeader('Content-Type', 'application/json');
   auditMetrics.apiCallsCount++;
 
-  try {
-    const hasFile = Boolean(req.file);
-    const bodyText = req.body?.text && typeof req.body.text === 'string' ? req.body.text.trim() : '';
+  console.log(`[Resume Extraction Request]: Path=${req.path} Method=${req.method} ContentType=${req.headers['content-type'] || 'none'}`);
 
-    if (!hasFile && !bodyText) {
-      return res.status(400).json({ error: true, message: 'No resume file or text provided.' });
+  try {
+    // 1. Resolve uploaded file or direct text payload
+    const anyFiles = (req.files as Express.Multer.File[]) || (req.file ? [req.file] : []);
+    const uploadedFile = anyFiles[0];
+    const bodyText = (
+      typeof req.body?.text === 'string'
+        ? req.body.text
+        : typeof req.body?.content === 'string'
+        ? req.body.content
+        : ''
+    ).trim();
+
+    if (!uploadedFile && !bodyText) {
+      console.warn('[Resume Extraction]: Neither resume file nor text was provided.');
+      return res.status(400).json({
+        success: false,
+        error: 'No resume document or text was provided for extraction.',
+        status: 400
+      });
     }
 
-    let originalname = 'pasted-resume.txt';
-    let mimetype = 'text/plain';
-    let ext = '.txt';
-    let size = bodyText.length;
+    let originalname = uploadedFile ? uploadedFile.originalname : (req.body?.fileName || 'pasted-resume.txt');
+    let mimetype = uploadedFile ? uploadedFile.mimetype : 'text/plain';
+    let ext = path.extname(originalname).toLowerCase();
+    let size = uploadedFile ? uploadedFile.size : bodyText.length;
     let extractedText = bodyText;
-    let buffer: Buffer = Buffer.from(bodyText, 'utf-8');
 
-    if (req.file) {
-      originalname = req.file.originalname;
-      mimetype = req.file.mimetype;
-      buffer = req.file.buffer;
-      size = req.file.size;
-      ext = path.extname(originalname).toLowerCase();
-
-      console.log(`[Resume Upload Received]: ${originalname} (${size} bytes, MIME: ${mimetype})`);
+    if (uploadedFile) {
+      const buffer = uploadedFile.buffer;
+      console.log(`[Resume Extraction]: Processing document "${originalname}" (${size} bytes, MIME: ${mimetype})`);
 
       if (mimetype === 'application/pdf' || ext === '.pdf') {
         extractedText = await extractTextFromPdf(buffer);
@@ -408,7 +473,7 @@ app.post('/api/resume/upload-and-extract', upload.single('resume') as any, async
           const docxResult = await mammoth.extractRawText({ buffer });
           extractedText = docxResult.value || '';
         } catch (docxErr: any) {
-          console.warn('[DOCX Mammoth parse notice]:', docxErr.message);
+          console.warn('[Resume Extraction]: Mammoth DOCX parse warning:', docxErr.message);
         }
       } else {
         extractedText = buffer.toString('utf-8');
@@ -417,97 +482,116 @@ app.post('/api/resume/upload-and-extract', upload.single('resume') as any, async
 
     const cleanText = (extractedText || bodyText).replace(/\r\n/g, '\n').trim();
 
+    if (!cleanText || cleanText.length < 5) {
+      console.warn('[Resume Extraction]: Document text extraction yielded empty or unreadable text.');
+      return res.status(400).json({
+        success: false,
+        error: 'The uploaded resume file could not be parsed into readable text. Please check the document format or paste the text directly.',
+        status: 400
+      });
+    }
+
+    console.log(`[Resume Extraction]: Extracted ${cleanText.length} characters of raw document text.`);
+
     let completeProfile: any = null;
     let extractionSource: 'gemini' | 'fallback' = 'gemini';
 
-    // Model candidate waterfall for maximum reliability (gemini-3.8-flash first as per gemini-api skill)
-    const CANDIDATE_MODELS = ['gemini-3.8-flash', 'gemini-flash-latest', 'gemini-3.1-flash-lite'];
+    // Provider Selection
+    const hasGemini = Boolean(ai && process.env.GEMINI_API_KEY);
+    console.log(`[Resume Extraction Provider]: ${hasGemini ? 'Gemini 3.1 Flash Lite (@google/genai)' : 'Deterministic Taxonomy Parser'}`);
 
-    if (ai && process.env.GEMINI_API_KEY && (cleanText.length > 15 || (req.file && buffer.length > 100))) {
-      for (const modelName of CANDIDATE_MODELS) {
-        if (completeProfile) break;
-        try {
-          console.log(`[Gemini Extraction]: Attempting extraction using model "${modelName}"...`);
+    if (hasGemini) {
+      const modelName = 'gemini-3.1-flash-lite';
+      const startTime = Date.now();
+      try {
+        console.log(`[Gemini API Request]: Sending ${cleanText.length} characters to model "${modelName}"...`);
 
-          const contents: any[] = [];
+        const prompt = `${RESUME_EXTRACTION_PROMPT}\n\nRESUME DOCUMENT TEXT:\n"""\n${cleanText.slice(0, 32000)}\n"""`;
 
-          // If document text was extracted, pass it as structured text part
-          contents.push({
-            text: `${RESUME_EXTRACTION_PROMPT}\n\nRESUME DOCUMENT TEXT:\n"""\n${cleanText.slice(0, 32000)}\n"""`
-          });
+        const geminiPromise = ai!.models.generateContent({
+          model: modelName,
+          contents: prompt,
+          config: {
+            systemInstruction: 'You are an expert resume parser. Extract structured resume JSON strictly with factual accuracy. Never fabricate missing data.',
+            responseMimeType: 'application/json',
+            responseSchema: RESUME_RESPONSE_SCHEMA
+          }
+        });
 
-          const geminiPromise = ai.models.generateContent({
-            model: modelName,
-            contents,
-            config: {
-              systemInstruction: 'You extract structured resume JSON with 100% factual accuracy. Never fabricate missing data.',
-              responseMimeType: 'application/json',
-              responseSchema: RESUME_RESPONSE_SCHEMA
-            }
-          });
+        // 25-second timeout allowing thorough LLM extraction
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error(`Timeout on model ${modelName} after 25s`)), 25000)
+        );
 
-          // 25s timeout for fast responsiveness
-          const timeoutPromise = new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error(`Timeout on model ${modelName}`)), 25000)
-          );
+        const geminiRes = await Promise.race([geminiPromise, timeoutPromise]);
+        const durationMs = Date.now() - startTime;
+        console.log(`[Gemini API Response Status]: SUCCESS (${durationMs}ms)`);
 
-          const geminiRes = await Promise.race([geminiPromise, timeoutPromise]);
-          const responseText = geminiRes.text?.trim() || '{}';
-          const parsedData = JSON.parse(responseText);
+        const responseText = geminiRes.text?.trim() || '{}';
+        const parsedData = JSON.parse(responseText);
 
-          // Combine all detected skills, technical skills, tools, and languages
-          const distinctSkills = Array.from(new Set([
-            ...(parsedData.skills || []),
-            ...(parsedData.technicalSkills || []),
-            ...(parsedData.tools || []),
-            ...(parsedData.languages || [])
-          ])).filter(Boolean);
+        // Validation & deduplication
+        const distinctSkills = Array.from(new Set([
+          ...(Array.isArray(parsedData.skills) ? parsedData.skills : []),
+          ...(Array.isArray(parsedData.technicalSkills) ? parsedData.technicalSkills : []),
+          ...(Array.isArray(parsedData.tools) ? parsedData.tools : []),
+          ...(Array.isArray(parsedData.languages) ? parsedData.languages : [])
+        ])).filter(Boolean);
 
-          auditMetrics.skillsExtracted += distinctSkills.length;
+        auditMetrics.skillsExtracted += distinctSkills.length;
+        console.log(`[Gemini JSON Validation]: Validated JSON response. Extracted ${distinctSkills.length} skills, Name="${parsedData.fullName || 'null'}", Role="${parsedData.currentRole || 'null'}"`);
 
-          completeProfile = {
-            id: `profile-${Date.now()}`,
+        completeProfile = {
+          id: `profile-${Date.now()}`,
+          basics: {
             fullName: parsedData.fullName || null,
             email: parsedData.email || null,
             phone: parsedData.phone || null,
-            location: parsedData.location || null,
             currentRole: parsedData.currentRole || null,
             yearsOfExperience: typeof parsedData.yearsOfExperience === 'number' ? parsedData.yearsOfExperience : null,
-            summary: parsedData.summary || null,
-            previousRoles: parsedData.previousRoles || [],
-            industries: parsedData.industries || [],
-            education: parsedData.education || [],
-            skills: distinctSkills,
-            technicalSkills: parsedData.technicalSkills || distinctSkills,
-            softSkills: parsedData.softSkills || [],
-            projects: parsedData.projects || [],
-            certifications: parsedData.certifications || [],
-            workExperience: parsedData.workExperience || [],
-            careerInterests: parsedData.careerInterests || [],
-            domains: parsedData.domains || parsedData.industries || [],
-            tools: parsedData.tools || [],
-            languages: parsedData.languages || [],
-            achievements: parsedData.achievements || [],
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-            extractionSource: 'gemini',
-            extractionConfidence: 0.98
-          };
-
-          console.log(`[Gemini Extraction SUCCESS with ${modelName}]: Extracted ${distinctSkills.length} skills, Name: "${completeProfile.fullName || 'Unstated'}", Role: "${completeProfile.currentRole || 'Unstated'}"`);
-        } catch (geminiErr: any) {
-          console.warn(`[Gemini candidate ${modelName} notice]:`, geminiErr.message || geminiErr);
-          await new Promise(r => setTimeout(r, 400));
-        }
+            location: parsedData.location || null,
+            summary: parsedData.summary || null
+          },
+          fullName: parsedData.fullName || null,
+          email: parsedData.email || null,
+          phone: parsedData.phone || null,
+          location: parsedData.location || null,
+          currentRole: parsedData.currentRole || null,
+          yearsOfExperience: typeof parsedData.yearsOfExperience === 'number' ? parsedData.yearsOfExperience : null,
+          summary: parsedData.summary || null,
+          previousRoles: Array.isArray(parsedData.previousRoles) ? parsedData.previousRoles : [],
+          industries: Array.isArray(parsedData.industries) ? parsedData.industries : [],
+          education: Array.isArray(parsedData.education) ? parsedData.education : [],
+          skills: distinctSkills,
+          technicalSkills: Array.isArray(parsedData.technicalSkills) && parsedData.technicalSkills.length > 0 ? parsedData.technicalSkills : distinctSkills,
+          softSkills: Array.isArray(parsedData.softSkills) ? parsedData.softSkills : [],
+          projects: Array.isArray(parsedData.projects) ? parsedData.projects : [],
+          certifications: Array.isArray(parsedData.certifications) ? parsedData.certifications : [],
+          workExperience: Array.isArray(parsedData.workExperience) ? parsedData.workExperience : [],
+          careerInterests: Array.isArray(parsedData.careerInterests) ? parsedData.careerInterests : [],
+          domains: Array.isArray(parsedData.domains) ? parsedData.domains : (parsedData.industries || []),
+          tools: Array.isArray(parsedData.tools) ? parsedData.tools : [],
+          languages: Array.isArray(parsedData.languages) ? parsedData.languages : [],
+          achievements: Array.isArray(parsedData.achievements) ? parsedData.achievements : [],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          extractionSource: 'gemini',
+          extractionConfidence: 0.98
+        };
+      } catch (geminiErr: any) {
+        console.warn(`[Gemini Extraction Warning]: ${geminiErr.message}. Activating deterministic taxonomy fallback.`);
       }
     }
 
+    // Deterministic fallback if Gemini was not configured or encountered an issue
     if (!completeProfile) {
       auditMetrics.fallbackUsageCount++;
-      console.log('[Activating Taxonomy-Driven Deterministic Parser]');
+      console.log('[Resume Extraction]: Running deterministic taxonomy parser on document text');
       completeProfile = extractDeterministicProfileFromText(cleanText);
       extractionSource = 'fallback';
     }
+
+    console.log(`[Resume Extraction Complete]: Source=${extractionSource} FinalSkillsCount=${completeProfile.skills.length}`);
 
     const resumeMeta = {
       fileName: originalname,
@@ -524,299 +608,27 @@ app.post('/api/resume/upload-and-extract', upload.single('resume') as any, async
       source: extractionSource
     });
   } catch (error: any) {
-    console.error('[Document Extraction Error]:', error);
+    console.error('[Resume Extraction Fatal Handler Error]:', error);
     return res.status(500).json({
-      error: true,
-      code: 'EXTRACTION_ERROR',
-      message: error.message || 'An error occurred during resume processing.'
+      success: false,
+      error: `Resume extraction failed: ${error.message || 'Server processing error'}`,
+      status: 500
     });
   }
-});
+}
 
-// ----------------------------------------------------
-// 2. Legacy / Compatibility Parse Route (Extracts text safely without crashing on PDF)
-// ----------------------------------------------------
-app.post('/api/resume/parse', upload.single('resume') as any, async (req: express.Request, res: express.Response) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'No resume file uploaded.' });
-    }
+// Register all extraction routes to the unified handler
+app.post('/api/resume/upload-and-extract', upload.any() as any, handleResumeExtraction);
+app.post('/api/resume/extract', upload.any() as any, handleResumeExtraction);
+app.post('/api/resume/parse', upload.any() as any, handleResumeExtraction);
+app.post('/api/resume/fallback', upload.any() as any, handleResumeExtraction);
 
-    const { originalname, mimetype, buffer, size } = req.file;
-    let extractedText = '';
-    const ext = path.extname(originalname).toLowerCase();
-
-    if (mimetype === 'application/pdf' || ext === '.pdf') {
-      extractedText = await extractTextFromPdf(buffer);
-    } else if (
-      mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
-      ext === '.docx'
-    ) {
-      try {
-        const result = await mammoth.extractRawText({ buffer });
-        extractedText = result.value || '';
-      } catch (docxErr: any) {
-        console.warn('[DOCX Parse notice]:', docxErr.message);
-      }
-    } else if (mimetype === 'text/plain' || ext === '.txt' || ext === '.md') {
-      extractedText = buffer.toString('utf-8');
-    }
-
-    const cleanText = extractedText.replace(/\r\n/g, '\n').trim();
-
-    res.json({
-      success: true,
-      text: cleanText,
-      fileName: originalname,
-      fileSize: size,
-      fileType: ext || mimetype,
-      characterCount: cleanText.length
-    });
-  } catch (error: any) {
-    console.error('[Document Extraction Error]:', error);
-    res.status(500).json({
-      error: 'Unexpected error during resume document extraction.',
-      details: error.message
-    });
-  }
-});
-
-// ----------------------------------------------------
-// 2. AI Structured Extraction with Gemini
-// ----------------------------------------------------
-app.post('/api/resume/extract', async (req, res) => {
-  auditMetrics.apiCallsCount++;
-  const { text, fileName } = req.body;
-
-  if (!text || typeof text !== 'string' || text.trim().length === 0) {
-    return res.status(400).json({ error: 'Missing or empty resume text.' });
-  }
-
-  if (!ai || !process.env.GEMINI_API_KEY) {
-    return res.status(503).json({
-      error: true,
-      code: 'GEMINI_KEY_NOT_CONFIGURED',
-      message: 'GEMINI_API_KEY is not configured on the server. AI extraction requires a valid Gemini API key.'
-    });
-  }
-
-  try {
-    const prompt = `You are a high-precision career resume information extraction engine.
-Analyze the following resume document text with absolute fidelity.
-
-CRITICAL RULES:
-1. Extract ONLY information that is ACTUALLY and EXPLICITLY present in the resume text.
-2. NEVER invent, hallucinate, or assume any information.
-3. NEVER automatically fill placeholder strings like "Candidate Profile", "Software Engineer", "0 years", or "Degree in Computer Science".
-4. If a field is not found in the resume, return null (for scalar values) or an empty array [] (for list values).
-5. Extract all technical skills, tools, soft skills, programming languages, and frameworks explicitly mentioned.
-6. Extract work experiences, projects, education history, and certifications accurately with duration and dates if stated.
-
-RESUME DOCUMENT TEXT:
-"""
-${text.slice(0, 30000)}
-"""`;
-
-    const executeCall = async () => {
-      const CANDIDATE_MODELS = ['gemini-3.1-flash-lite', 'gemini-3.8-flash', 'gemini-flash-latest'];
-      let lastErr: any = null;
-      for (const m of CANDIDATE_MODELS) {
-        try {
-          return await ai!.models.generateContent({
-            model: m,
-            contents: prompt,
-            config: {
-              systemInstruction: 'You extract structured resume JSON with 100% factual accuracy. Never fabricate missing data.',
-              responseMimeType: 'application/json',
-              responseSchema: {
-                type: Type.OBJECT,
-                properties: {
-                  fullName: { type: Type.STRING, description: 'Candidate full name if found, else null', nullable: true },
-                  email: { type: Type.STRING, description: 'Email address if found, else null', nullable: true },
-                  phone: { type: Type.STRING, description: 'Phone number if found, else null', nullable: true },
-                  currentRole: { type: Type.STRING, description: 'Current or most recent job title if found, else null', nullable: true },
-                  yearsOfExperience: { type: Type.NUMBER, description: 'Calculated or stated years of professional experience, else null', nullable: true },
-                  location: { type: Type.STRING, description: 'City, state, or country if found, else null', nullable: true },
-                  education: {
-                    type: Type.ARRAY,
-                    items: {
-                      type: Type.OBJECT,
-                      properties: {
-                        degree: { type: Type.STRING },
-                        fieldOfStudy: { type: Type.STRING },
-                        institution: { type: Type.STRING },
-                        year: { type: Type.STRING },
-                        grade: { type: Type.STRING }
-                      }
-                    }
-                  },
-                  skills: { type: Type.ARRAY, items: { type: Type.STRING }, description: 'All distinct skills mentioned' },
-                  technicalSkills: { type: Type.ARRAY, items: { type: Type.STRING } },
-                  softSkills: { type: Type.ARRAY, items: { type: Type.STRING } },
-                  tools: { type: Type.ARRAY, items: { type: Type.STRING } },
-                  domains: { type: Type.ARRAY, items: { type: Type.STRING } },
-                  languages: { type: Type.ARRAY, items: { type: Type.STRING } },
-                  workExperience: {
-                    type: Type.ARRAY,
-                    items: {
-                      type: Type.OBJECT,
-                      properties: {
-                        company: { type: Type.STRING },
-                        role: { type: Type.STRING },
-                        duration: { type: Type.STRING },
-                        location: { type: Type.STRING },
-                        responsibilities: { type: Type.ARRAY, items: { type: Type.STRING } }
-                      }
-                    }
-                  },
-                  projects: {
-                    type: Type.ARRAY,
-                    items: {
-                      type: Type.OBJECT,
-                      properties: {
-                        name: { type: Type.STRING },
-                        technologies: { type: Type.ARRAY, items: { type: Type.STRING } },
-                        description: { type: Type.STRING }
-                      }
-                    }
-                  },
-                  certifications: {
-                    type: Type.ARRAY,
-                    items: {
-                      type: Type.OBJECT,
-                      properties: {
-                        name: { type: Type.STRING },
-                        issuer: { type: Type.STRING },
-                        year: { type: Type.STRING }
-                      }
-                    }
-                  },
-                  careerInterests: { type: Type.ARRAY, items: { type: Type.STRING } },
-                  achievements: { type: Type.ARRAY, items: { type: Type.STRING } }
-                },
-                required: [
-                  'education',
-                  'skills',
-                  'technicalSkills',
-                  'softSkills',
-                  'workExperience',
-                  'projects',
-                  'certifications',
-                  'tools',
-                  'domains',
-                  'languages',
-                  'careerInterests',
-                  'achievements'
-                ]
-              }
-            }
-          });
-        } catch (err: any) {
-          lastErr = err;
-          await new Promise(r => setTimeout(r, 600));
-        }
-      }
-      throw lastErr || new Error('All Gemini model candidates failed extraction.');
-    };
-
-    let response;
-    try {
-      response = await executeCall();
-    } catch (firstErr: any) {
-      // If temporary capacity issue, wait 1.2s and retry once
-      if (firstErr?.status === 503 || firstErr?.message?.includes('503') || firstErr?.message?.includes('demand')) {
-        await new Promise(r => setTimeout(r, 1200));
-        response = await executeCall();
-      } else {
-        throw firstErr;
-      }
-    }
-
-    const responseText = response.text?.trim() || '{}';
-    const parsedData = JSON.parse(responseText);
-
-    auditMetrics.skillsExtracted += (parsedData.skills?.length || 0);
-
-    const completeProfile = {
-      id: `profile-${Date.now()}`,
-      fullName: parsedData.fullName || null,
-      email: parsedData.email || null,
-      phone: parsedData.phone || null,
-      currentRole: parsedData.currentRole || null,
-      yearsOfExperience: typeof parsedData.yearsOfExperience === 'number' ? parsedData.yearsOfExperience : null,
-      location: parsedData.location || null,
-      education: parsedData.education || [],
-      skills: Array.from(new Set([...(parsedData.skills || []), ...(parsedData.technicalSkills || [])])),
-      technicalSkills: parsedData.technicalSkills || [],
-      softSkills: parsedData.softSkills || [],
-      projects: parsedData.projects || [],
-      certifications: parsedData.certifications || [],
-      workExperience: parsedData.workExperience || [],
-      careerInterests: parsedData.careerInterests || [],
-      domains: parsedData.domains || [],
-      tools: parsedData.tools || [],
-      languages: parsedData.languages || [],
-      achievements: parsedData.achievements || [],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      extractionSource: 'gemini',
-      extractionConfidence: 0.95
-    };
-
-    res.json({
-      success: true,
-      profile: completeProfile
-    });
-  } catch (error: any) {
-    console.error('[Gemini Extraction Failure]:', error);
-    res.status(500).json({
-      error: true,
-      code: error.code || 'GEMINI_EXTRACTION_ERROR',
-      message: error.message || 'Gemini API call failed during resume extraction.',
-      details: error.statusText || error.stack
-    });
-  }
-});
-
-// ----------------------------------------------------
-// 3. Deterministic Fallback Parser (NO generic values)
-// ----------------------------------------------------
-app.post('/api/resume/fallback', upload.single('resume') as any, async (req: express.Request, res: express.Response) => {
-  auditMetrics.fallbackUsageCount++;
-  let text = req.body?.text || '';
-
-  if (req.file) {
-    const { originalname, mimetype, buffer } = req.file;
-    const ext = path.extname(originalname).toLowerCase();
-
-    if (mimetype === 'application/pdf' || ext === '.pdf') {
-      text = await extractTextFromPdf(buffer);
-    } else if (
-      mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
-      ext === '.docx'
-    ) {
-      try {
-        const result = await mammoth.extractRawText({ buffer });
-        text = result.value || '';
-      } catch {
-        // pass
-      }
-    } else {
-      text = buffer.toString('utf-8');
-    }
-  }
-
-  if (!text || typeof text !== 'string') {
-    return res.status(400).json({ error: 'Missing resume text or file.' });
-  }
-
-  const fallbackProfile = extractDeterministicProfileFromText(text);
-
+app.get(['/api/resume/upload-and-extract', '/api/resume/extract', '/api/resume/parse', '/api/resume/fallback'], (req, res) => {
   res.setHeader('Content-Type', 'application/json');
-  res.json({
-    success: true,
-    profile: fallbackProfile,
-    warning: 'FALLBACK EXTRACTION: Extracted using local deterministic regex matching. Unverified fields are left empty for manual review.'
+  return res.status(405).json({
+    success: false,
+    error: 'Method Not Allowed. Use HTTP POST with file upload or JSON payload.',
+    status: 405
   });
 });
 
@@ -1101,9 +913,11 @@ app.get('/api/audit', async (req, res) => {
 
 // Explicit JSON 404 for any unmatched /api/* requests (prevents falling through to Vite index.html)
 app.all('/api/*', (req, res) => {
+  res.setHeader('Content-Type', 'application/json');
   res.status(404).json({
-    error: true,
-    message: `API route not found: ${req.method} ${req.path}`
+    success: false,
+    error: `API route not found: ${req.method} ${req.path}`,
+    status: 404
   });
 });
 
@@ -1111,10 +925,11 @@ app.all('/api/*', (req, res) => {
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
   if (req.path.startsWith('/api/')) {
     console.error('[API Error Caught]:', err.message || err);
+    res.setHeader('Content-Type', 'application/json');
     return res.status(err.status || 500).json({
-      error: true,
-      code: err.code || 'API_PROCESSING_ERROR',
-      message: err.message || 'An unexpected error occurred processing your API request.'
+      success: false,
+      error: err.message || 'An unexpected error occurred processing your API request.',
+      status: err.status || 500
     });
   }
   next(err);
@@ -1130,7 +945,10 @@ async function startServer() {
   if (process.env.NODE_ENV !== 'production') {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        hmr: false
+      },
       appType: 'spa'
     });
     app.use(vite.middlewares);

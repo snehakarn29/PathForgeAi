@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { UserProfile, ResumeMeta } from '../types/profile.ts';
 import { StorageService } from '../services/storageService.ts';
+import { ResumeIngestionPortal3D } from '../components/three/ResumeIngestionPortal3D.tsx';
 
 interface OnboardingPageProps {
   onProfileExtracted: (profile: UserProfile, meta?: ResumeMeta) => void;
@@ -203,122 +204,129 @@ export const OnboardingPage: React.FC<OnboardingPageProps> = ({
         body: formData
       });
 
-      const rawText = await response.text();
+      // Validate Content-Type before reading response body
+      const contentType = response.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        const rawHtml = await response.text();
+        console.error('[Resume Extraction Non-JSON Error]: Status', response.status, rawHtml.slice(0, 400));
+        setErrorMessage(`Server error (${response.status}): Expected JSON from extraction API but received ${contentType || 'non-JSON HTML'}. Diagnostic: ${rawHtml.slice(0, 160)}...`);
+        setParsingStep('error');
+        return;
+      }
+
       let data: any = null;
-
       try {
-        data = JSON.parse(rawText);
-      } catch (jsonErr) {
-        console.warn('[Server returned non-JSON, running resilient fallback]:', jsonErr);
-        await handleFallbackExtraction(textToSend);
+        data = await response.json();
+      } catch (jsonErr: any) {
+        console.error('[JSON Parse Error]:', jsonErr);
+        setErrorMessage(`Failed to parse extraction server response: ${jsonErr.message}`);
+        setParsingStep('error');
         return;
       }
 
-      if (!response.ok || !data || !data.success || !data.profile) {
-        console.warn('[Extraction notice, engaging deterministic fallback]:', data);
-        await handleFallbackExtraction(textToSend);
+      if (!response.ok || !data || data.success === false || !data.profile) {
+        const errorMsg = data?.error || data?.message || `Extraction failed with HTTP status ${response.status}`;
+        console.error('[Extraction Error from API]:', errorMsg);
+        setErrorMessage(errorMsg);
+        setParsingStep('error');
         return;
       }
+
+      // Preserve actual uploaded resume data
+      const rawProfile = data.profile;
+      const basics = rawProfile.basics || {};
+
+      const cleanProfile: UserProfile = {
+        id: rawProfile.id || `profile-${Date.now()}`,
+        fullName: rawProfile.fullName || basics.fullName || null,
+        email: rawProfile.email || basics.email || null,
+        phone: rawProfile.phone || basics.phone || null,
+        currentRole: rawProfile.currentRole || basics.currentRole || null,
+        yearsOfExperience: rawProfile.yearsOfExperience !== undefined ? rawProfile.yearsOfExperience : (basics.yearsOfExperience !== undefined ? basics.yearsOfExperience : null),
+        location: rawProfile.location || basics.location || null,
+        summary: rawProfile.summary || basics.summary || null,
+        previousRoles: Array.isArray(rawProfile.previousRoles) ? rawProfile.previousRoles : [],
+        industries: Array.isArray(rawProfile.industries) ? rawProfile.industries : [],
+        education: Array.isArray(rawProfile.education) ? rawProfile.education : [],
+        skills: Array.isArray(rawProfile.skills) ? rawProfile.skills : [],
+        technicalSkills: Array.isArray(rawProfile.technicalSkills) && rawProfile.technicalSkills.length > 0 ? rawProfile.technicalSkills : (Array.isArray(rawProfile.skills) ? rawProfile.skills : []),
+        softSkills: Array.isArray(rawProfile.softSkills) ? rawProfile.softSkills : [],
+        workExperience: Array.isArray(rawProfile.workExperience) ? rawProfile.workExperience : [],
+        projects: Array.isArray(rawProfile.projects) ? rawProfile.projects : [],
+        certifications: Array.isArray(rawProfile.certifications) ? rawProfile.certifications : [],
+        tools: Array.isArray(rawProfile.tools) ? rawProfile.tools : [],
+        domains: Array.isArray(rawProfile.domains) ? rawProfile.domains : [],
+        languages: Array.isArray(rawProfile.languages) ? rawProfile.languages : [],
+        careerInterests: Array.isArray(rawProfile.careerInterests) ? rawProfile.careerInterests : [],
+        achievements: Array.isArray(rawProfile.achievements) ? rawProfile.achievements : [],
+        createdAt: rawProfile.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        extractionSource: rawProfile.extractionSource || (data.source === 'fallback' ? 'fallback' : 'gemini'),
+        extractionConfidence: rawProfile.extractionConfidence || (rawProfile.extractionSource === 'gemini' ? 0.98 : 0.85)
+      };
 
       setParsingStep('normalizing');
-      await new Promise(r => setTimeout(r, 400));
+      await new Promise(r => setTimeout(r, 300));
 
       setParsingStep('complete');
-      if (data.source === 'fallback') {
+      if (cleanProfile.extractionSource === 'fallback') {
         setIsFallbackMode(true);
+      } else {
+        setIsFallbackMode(false);
       }
       if (data.meta) {
         StorageService.saveResumeMeta(data.meta);
       }
-      onProfileExtracted(data.profile, data.meta);
+      onProfileExtracted(cleanProfile, data.meta);
       onNavigate('/profile');
     } catch (err: any) {
-      console.warn('[Network/Extraction caught, engaging fallback]:', err.message);
-      await handleFallbackExtraction(textToSend);
+      console.error('[Network/Fetch Error]:', err.message);
+      setErrorMessage(`Network error: ${err.message || 'Failed to reach resume extraction service'}. Please verify server connection.`);
+      setParsingStep('error');
     }
   };
 
   const handleFallbackExtraction = async (directText?: string) => {
     try {
       setParsingStep('normalizing');
+      setErrorMessage(null);
       const formData = new FormData();
       if (file && !directText) {
         formData.append('resume', file);
       }
-      if (directText) {
-        formData.append('text', directText);
+      if (directText || pastedText) {
+        formData.append('text', directText || pastedText);
       }
 
-      let fallbackData: any = null;
-      try {
-        const fallbackRes = await fetch('/api/resume/fallback', {
-          method: 'POST',
-          headers: { Accept: 'application/json' },
-          body: formData
-        });
-        const raw = await fallbackRes.text();
-        fallbackData = JSON.parse(raw);
-      } catch (e) {
-        console.warn('[Fallback route non-JSON]:', e);
+      const fallbackRes = await fetch('/api/resume/fallback', {
+        method: 'POST',
+        headers: { Accept: 'application/json' },
+        body: formData
+      });
+
+      const contentType = fallbackRes.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        const rawHtml = await fallbackRes.text();
+        console.error('[Fallback Route Non-JSON Error]:', fallbackRes.status, rawHtml.slice(0, 300));
+        setErrorMessage(`Fallback extraction returned non-JSON (${fallbackRes.status}): ${rawHtml.slice(0, 150)}...`);
+        setParsingStep('error');
+        return;
       }
 
-      if (fallbackData && fallbackData.profile) {
+      const fallbackData = await fallbackRes.json();
+      if (fallbackRes.ok && fallbackData && fallbackData.success && fallbackData.profile) {
         setIsFallbackMode(true);
         setParsingStep('complete');
-        onProfileExtracted(fallbackData.profile);
+        onProfileExtracted(fallbackData.profile, fallbackData.meta);
         onNavigate('/profile');
         return;
       }
 
-      // Client-side text parsing as ultimate safety net
-      let clientText = directText || '';
-      if (!clientText && file) {
-        try {
-          clientText = await file.text();
-        } catch {}
-      }
-
-      const commonSkills = [
-        'Python', 'Java', 'JavaScript', 'TypeScript', 'SQL', 'React', 'Node.js',
-        'Docker', 'AWS', 'Kubernetes', 'Git', 'Linux', 'PostgreSQL', 'MongoDB',
-        'Next.js', 'FastAPI', 'PyTorch', 'TensorFlow', 'Scikit-Learn', 'Go'
-      ];
-      const matched = commonSkills.filter(s =>
-        clientText.toLowerCase().includes(s.toLowerCase())
-      );
-
-      const localProfile: UserProfile = {
-        id: `profile-${Date.now()}`,
-        fullName: file ? file.name.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ') : 'Extracted Candidate Profile',
-        email: null,
-        phone: null,
-        currentRole: 'Software Professional',
-        yearsOfExperience: 3,
-        location: null,
-        education: [],
-        skills: matched.length > 0 ? matched : ['JavaScript', 'TypeScript', 'React', 'Git', 'SQL'],
-        technicalSkills: matched.length > 0 ? matched : ['JavaScript', 'TypeScript', 'React', 'Git', 'SQL'],
-        softSkills: [],
-        workExperience: [],
-        projects: [],
-        certifications: [],
-        tools: [],
-        domains: [],
-        languages: [],
-        careerInterests: [],
-        achievements: [],
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        extractionSource: 'fallback',
-        extractionConfidence: 0.88
-      };
-
-      setIsFallbackMode(true);
-      setParsingStep('complete');
-      onProfileExtracted(localProfile);
-      onNavigate('/profile');
-    } catch (err: any) {
-      setErrorMessage(`Extraction failed: ${err.message}. You can enter your profile manually.`);
+      setErrorMessage(fallbackData?.error || 'Deterministic extraction was unable to parse profile details.');
+      setParsingStep('error');
+    } catch (e: any) {
+      console.error('[Fallback route error]:', e);
+      setErrorMessage(`Deterministic parsing failed: ${e.message}`);
       setParsingStep('error');
     }
   };
@@ -477,14 +485,25 @@ export const OnboardingPage: React.FC<OnboardingPageProps> = ({
       {/* Tab 1: File Upload */}
       {activeTab === 'upload' && (
         <div className="space-y-6">
+          {/* Holographic 3D Ingestion Core */}
+          <div className="bg-slate-900/60 border border-slate-800 rounded-3xl p-4 relative overflow-hidden">
+            <div className="flex items-center justify-between px-3 text-[11px] font-mono text-slate-400 mb-1">
+              <span className="text-cyan-400 font-bold uppercase tracking-wider">
+                Quantum Ingestion Portal
+              </span>
+              <span>{isDragging ? 'Vortex Attractor Active' : (parsingStep === 'gemini_extract' ? 'Gemini Laser Scanning...' : 'Awaiting Document Input')}</span>
+            </div>
+            <ResumeIngestionPortal3D status={parsingStep} isDragging={isDragging} />
+          </div>
+
           <div
             onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
             onDragLeave={() => setIsDragging(false)}
             onDrop={handleFileDrop}
             onClick={() => fileInputRef.current?.click()}
-            className={`border-2 border-dashed rounded-3xl p-8 sm:p-12 text-center transition-all cursor-pointer ${
+            className={`border-2 border-dashed rounded-3xl p-8 sm:p-10 text-center transition-all cursor-pointer ${
               isDragging
-                ? 'border-cyan-400 bg-cyan-950/20 scale-[1.01]'
+                ? 'border-cyan-400 bg-cyan-950/30 scale-[1.01]'
                 : 'border-slate-750 bg-slate-900/60 hover:border-slate-600 hover:bg-slate-900/80'
             }`}
           >
@@ -496,9 +515,9 @@ export const OnboardingPage: React.FC<OnboardingPageProps> = ({
               onChange={handleFileInput}
             />
 
-            <div className="flex flex-col items-center gap-4">
-              <div className="w-16 h-16 rounded-2xl bg-slate-800/80 border border-slate-700 flex items-center justify-center text-cyan-400 shadow-inner">
-                <FileText className="w-8 h-8" />
+            <div className="flex flex-col items-center gap-3">
+              <div className="w-14 h-14 rounded-2xl bg-slate-800/80 border border-slate-700 flex items-center justify-center text-cyan-400 shadow-inner">
+                <FileText className="w-7 h-7" />
               </div>
 
               <div>

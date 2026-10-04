@@ -92,8 +92,11 @@ const InnerPentagonCore: React.FC<{
     };
   }, [coreGeometry, outerGeometry]);
 
-  useFrame((state) => {
-    const t = state.clock.getElapsedTime();
+  const timeRef = useRef(0);
+
+  useFrame((state, delta) => {
+    timeRef.current += delta;
+    const t = timeRef.current;
     if (meshRef.current) {
       meshRef.current.rotation.z = Math.sin(t * 0.2) * 0.05;
       meshRef.current.rotation.y = t * 0.25;

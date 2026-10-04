@@ -42,11 +42,12 @@ const SceneNode: React.FC<{
   onClick: (node: GraphNode) => void;
 }> = ({ node, isSelected, isHovered, isHighlighted, onHover, onClick }) => {
   const meshRef = useRef<THREE.Mesh>(null);
+  const timeRef = useRef(0);
 
-  useFrame((state) => {
+  useFrame((state, delta) => {
     if (!meshRef.current) return;
-    // Gentle floating motion
-    const t = state.clock.getElapsedTime();
+    timeRef.current += delta;
+    const t = timeRef.current;
     if (node.category === 'profile') {
       meshRef.current.rotation.y = t * 0.4;
     } else if (node.category === 'target_role') {

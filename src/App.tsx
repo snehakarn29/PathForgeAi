@@ -14,6 +14,7 @@ import { SettingsPage } from './pages/SettingsPage.tsx';
 import { SkillsPage } from './pages/SkillsPage.tsx';
 import { CommandCenterPage } from './pages/CommandCenterPage.tsx';
 import { WalkthroughModal } from './components/WalkthroughModal.tsx';
+import { SpatialConstellationBackground } from './components/three/SpatialConstellationBackground.tsx';
 
 import { UserProfile, ResumeMeta } from './types/profile.ts';
 import { MarketSnapshot } from './types/market.ts';
@@ -155,7 +156,10 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-cyan-500 selection:text-slate-950">
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col relative font-sans selection:bg-cyan-500 selection:text-slate-950">
+      {/* Ambient 3D Spatial Constellation Background */}
+      <SpatialConstellationBackground />
+
       {/* Top Navigation */}
       <Navbar
         currentRoute={currentRoute}
@@ -168,7 +172,7 @@ export default function App() {
       />
 
       {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 relative z-10">
         {currentRoute === '/' && (
           <LandingPage
             onNavigate={navigateTo}
